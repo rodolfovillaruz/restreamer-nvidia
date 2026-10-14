@@ -1,0 +1,121 @@
+# Restreamer (datarhei Core + UI) with NVIDIA NVENC on a single-node cluster.
+#
+# Prerequisites (see README.md):
+#   - containerd configured with the "nvidia" runtime (nvidia-ctk)
+#   - NVIDIA k8s-device-plugin running, so the node advertises nvidia.com/gpu
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: restreamer
+---
+apiVersion: node.k8s.io/v1
+kind: RuntimeClass
+metadata:
+  name: nvidia
+handler: nvidia
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: restreamer
+  namespace: restreamer
+  labels:
+    app: restreamer
+spec:
+  replicas: 1
+  # One GPU and hostPath volumes: the old pod must stop before the new one starts.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: restreamer
+  template:
+    metadata:
+      labels:
+        app: restreamer
+    spec:
+      runtimeClassName: nvidia
+      containers:
+        - name: restreamer
+          image: datarhei/restreamer:cuda-latest
+          imagePullPolicy: IfNotPresent
+          env:
+            # "video" is required for NVENC/NVDEC; the default is compute,utility only.
+            - name: NVIDIA_DRIVER_CAPABILITIES
+              value: compute,video,utility
+          ports:
+            - name: http
+              containerPort: 8080
+            - name: https
+              containerPort: 8181
+            - name: rtmp
+              containerPort: 1935
+            - name: rtmps
+              containerPort: 1936
+            - name: srt
+              containerPort: 6000
+              protocol: UDP
+          resources:
+            requests:
+              cpu: 500m
+              memory: 512Mi
+            limits:
+              memory: 4Gi
+              nvidia.com/gpu: 1
+          volumeMounts:
+            - name: config
+              mountPath: /core/config
+            - name: data
+              mountPath: /core/data
+          readinessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 20
+      volumes:
+        # No StorageClass on this cluster, so state lives on the node.
+        - name: config
+          hostPath:
+            path: /var/lib/restreamer/config
+            type: DirectoryOrCreate
+        - name: data
+          hostPath:
+            path: /var/lib/restreamer/data
+            type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: restreamer
+  namespace: restreamer
+spec:
+  type: NodePort
+  selector:
+    app: restreamer
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      nodePort: 30080
+    - name: https
+      port: 8181
+      targetPort: https
+      nodePort: 30181
+    - name: rtmp
+      port: 1935
+      targetPort: rtmp
+      nodePort: 31935
+    - name: rtmps
+      port: 1936
+      targetPort: rtmps
+      nodePort: 31936
+    - name: srt
+      port: 6000
+      targetPort: srt
+      protocol: UDP
+      nodePort: 30600
