@@ -16,7 +16,7 @@
 3. Install the NVIDIA device plugin so the node advertises `nvidia.com/gpu`:
 
    ```sh
-   kubectl apply -f https://raw.githubusercontent.com/NVIDIA/k8s-device-plugin/v0.17.4/deployments/static/nvidia-device-plugin.yml
+   kubectl apply -f https://raw.githubusercontent.com/NVIDIA/k8s-device-plugin/v0.20.1/deployments/static/nvidia-device-plugin.yml
    kubectl patch ds -n kube-system nvidia-device-plugin-daemonset \
      --type merge -p '{"spec":{"template":{"spec":{"runtimeClassName":"nvidia"}}}}'
    ```
