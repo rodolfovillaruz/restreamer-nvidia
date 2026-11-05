@@ -38,7 +38,7 @@ spec:
       containers:
         - name: restreamer
           image: datarhei/restreamer:cuda-latest
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           env:
             # "video" is required for NVENC/NVDEC; the default is compute,utility only.
             - name: NVIDIA_DRIVER_CAPABILITIES
