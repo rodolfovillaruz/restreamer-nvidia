@@ -1,0 +1,104 @@
+# nginx TLS-terminating proxy on the node's ports 80/443 (hostNetwork).
+#
+# Routes by SNI (L4 stream):
+#   restreamer.yes.ph -> restreamer.restreamer.svc:8080  (cert: secret proxy-tls-restreamer)
+#   anything else     -> registry.registry.svc:5000      (cert: secret proxy-tls)
+#
+# TLS secrets are not stored here; create them with:
+#   kubectl -n proxy create secret tls proxy-tls            --cert=yes.ph.crt            --key=yes.ph.key
+#   kubectl -n proxy create secret tls proxy-tls-restreamer --cert=restreamer.yes.ph.crt --key=restreamer.yes.ph.key
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: proxy
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: proxy-nginx-conf
+  namespace: proxy
+data:
+  nginx.conf: |
+    events {}
+    http {
+      server {
+        listen 80;
+        return 301 https://$host$request_uri;
+      }
+    }
+    stream {
+      # Route by SNI. Anything not listed keeps going to the registry (previous behaviour).
+      map $ssl_server_name $backend {
+        restreamer.yes.ph  restreamer;
+        default            registry;
+      }
+      map $ssl_server_name $cert {
+        restreamer.yes.ph  restreamer;
+        default            tls;
+      }
+      upstream registry   { server registry.registry.svc.cluster.local:5000; }
+      upstream restreamer { server restreamer.restreamer.svc.cluster.local:8080; }
+
+      server {
+        listen 443 ssl;
+        # Per-SNI cert, loaded at handshake time (picks up secret updates without a reload).
+        ssl_certificate     /certs/$cert.crt;
+        ssl_certificate_key /certs/$cert.key;
+        proxy_pass $backend;
+      }
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: proxy
+  namespace: proxy
+  labels:
+    app: proxy
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate # hostPort 80/443 can't be held by two pods at once
+  selector:
+    matchLabels:
+      app: proxy
+  template:
+    metadata:
+      labels:
+        app: proxy
+    spec:
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      containers:
+        - name: nginx
+          image: nginx:alpine
+          ports:
+            - containerPort: 443
+              hostPort: 443
+            - containerPort: 80
+              hostPort: 80
+          volumeMounts:
+            - name: nginx-conf
+              mountPath: /etc/nginx/nginx.conf
+              subPath: nginx.conf
+              readOnly: true
+            - name: proxy-tls
+              mountPath: /certs
+              readOnly: true
+      volumes:
+        - name: nginx-conf
+          configMap:
+            name: proxy-nginx-conf
+        - name: proxy-tls
+          projected:
+            sources:
+              - secret:
+                  name: proxy-tls # tls.crt / tls.key
+              - secret:
+                  name: proxy-tls-restreamer
+                  optional: true
+                  items:
+                    - key: tls.crt
+                      path: restreamer.crt
+                    - key: tls.key
+                      path: restreamer.key

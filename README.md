@@ -49,3 +49,16 @@ kubectl -n restreamer exec deploy/restreamer -- nvidia-smi
 UI: `http://<node-ip>:30080/ui`. OBS: `rtmp://<node-ip>:31935/...`
 
 State is stored on the node in `/var/lib/restreamer/{config,data}`.
+
+## HTTPS proxy (`restreamer.yes.ph`)
+
+`proxy.yaml` runs nginx on the node's ports 80/443 and routes by SNI:
+`restreamer.yes.ph` → Restreamer UI/API, everything else → the registry.
+
+```sh
+kubectl apply -f proxy.yaml
+kubectl -n proxy create secret tls proxy-tls-restreamer --cert=restreamer.yes.ph.crt --key=restreamer.yes.ph.key
+kubectl -n proxy rollout restart deploy/proxy   # only needed after nginx.conf changes
+```
+
+UI: `https://restreamer.yes.ph/ui`. RTMP/SRT still use the node ports above.
